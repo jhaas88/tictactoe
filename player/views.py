@@ -1,0 +1,75 @@
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.forms import UserCreationForm
+from django.core.exceptions import PermissionDenied
+from django.shortcuts import render, redirect, get_object_or_404
+from django.urls import reverse_lazy
+from django.views.generic import CreateView
+
+from gameplay.models import Game
+from player.models import Invitation
+from .forms import InvitationForm
+
+
+@login_required
+def home(request):
+    my_games = Game.objects.games_for_user(request.user)
+    active_games = my_games.active()
+    finished_games = my_games.difference(active_games)
+
+    invitations = request.user.invitations_received.all()
+    return render(request, "player/home.html",
+                  {'active_games': active_games,
+                   'finished_games': finished_games,
+                   'invitations': invitations})
+
+
+@login_required
+def new_invitation(request):
+    if request.method == "POST":
+        return _post_new_invitation(request)
+    else:
+        return _get_new_invitation(request)
+
+
+def _post_new_invitation(request):
+    invitation = Invitation(from_user=request.user)
+    form = InvitationForm(instance=invitation, data=request.POST)
+    if form.is_valid():
+        form.save()
+        return redirect('player_home')
+    else:
+        return render(request, "player/new_invitation_form.html", {"form": form})
+
+
+def _get_new_invitation(request):
+    form = InvitationForm()
+    return render(request, "player/new_invitation_form.html", {"form": form})
+
+
+@login_required()
+def accept_invitation(request, id):
+    invitation = get_object_or_404(Invitation, pk=id)
+    if not request.user == invitation.to_user:
+        raise PermissionDenied
+    if request.method == "POST":
+        return _post_accept_invitation(request, invitation)
+    else:
+        return _get_accept_invitation(request, invitation)
+
+
+def _post_accept_invitation(request, invitation):
+    if "accept" in request.POST:
+        game = Game.objects.create(first_player=invitation.to_user,
+                                   second_player=invitation.from_user)
+    invitation.delete()
+    return redirect(game)
+
+
+def _get_accept_invitation(request, invitation):
+    return render(request, "player/accept_invitation_form.html",
+                  {"invitation": invitation})
+
+class SignUpView(CreateView):
+    form_class = UserCreationForm
+    template_name = "player/signup_form.html"
+    success_url = reverse_lazy("player_home")
